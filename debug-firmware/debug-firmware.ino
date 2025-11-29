@@ -2,15 +2,18 @@
 const int ADDR[]    = {22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52}; // A0-A15 (16 pins)
 const int DATA[]    = {39, 41, 43, 45, 47, 49, 51, 53};                                 // D0-D7 (8 pins)
 const int CLK_PIN   = 2;                                                                // Clock pin (output)
-const int RESET_PIN = 3;                                                                // Reset pin (output)
-const int RW_PIN    = 4;                                                                // Read/Write pin (input)
+const int RESET_PIN = 4;                                                                // Reset pin (output)
+const int RW_PIN    = 3;                                                                // Read/Write pin (input)
 
 // Clock timing constants
-const int CLK_DELAY_US = 100; // Clock pulse delay in microseconds
+const int CLK_DELAY_US = 100; // Clock pulse HIGH duration in microseconds
 
 // State variables
 unsigned long cycleCount = 0;
 bool continuousMode      = false;
+uint8_t lastWriteData    = 0;     // Store the data written during write cycles
+uint16_t lastWriteAddr   = 0;     // Store the address written to
+bool lastWasWrite        = false; // Track if last cycle was a write
 
 void setup() {
     // Initialize serial communication
@@ -57,13 +60,55 @@ void setup() {
 }
 
 void stepClock() {
+    // Read address and R/W BEFORE doing anything else
+    uint16_t addr = readAddressBus();
+    bool rw       = readRW();
+
     // Pulse the clock pin HIGH then LOW
     digitalWrite(CLK_PIN, HIGH);
     digitalWrite(LED_BUILTIN, HIGH); // LED on when clock is high
-    delayMicroseconds(CLK_DELAY_US); // Clock high time
+
+    // During clock HIGH, if it's a write cycle, capture the data the 6502 is driving
+    if (!rw) {
+        // Write cycle - read what the 6502 is putting on the data bus
+        // Give the 6502 time to fully drive the bus after clock goes HIGH
+        delayMicroseconds(20); // Delay to ensure 6502 has driven the bus
+
+        // Read the data bus
+        uint8_t writeData = 0;
+        for (int n = 0; n < 8; n++) {
+            if (digitalRead(DATA[n]) == HIGH) {
+                writeData |= (1UL << n);
+            }
+        }
+
+        // Verify by reading again
+        delayMicroseconds(5);
+        uint8_t verifyData = 0;
+        for (int n = 0; n < 8; n++) {
+            if (digitalRead(DATA[n]) == HIGH) {
+                verifyData |= (1UL << n);
+            }
+        }
+
+        // Use the verified data
+        lastWriteData = verifyData;
+        lastWriteAddr = addr;
+        lastWasWrite  = true;
+
+        // Remaining clock high time (100us total - 25us already spent)
+        delayMicroseconds(CLK_DELAY_US - 25);
+    } else {
+        // Read cycle - just hold clock HIGH for specified duration
+        delayMicroseconds(CLK_DELAY_US);
+        lastWasWrite = false;
+    }
+
     digitalWrite(CLK_PIN, LOW);
-    digitalWrite(LED_BUILTIN, LOW);  // LED off when clock is low
-    delayMicroseconds(CLK_DELAY_US); // Stabilization delay
+    digitalWrite(LED_BUILTIN, LOW); // LED off when clock is low
+
+    // Small delay after clock goes LOW for stabilization
+    delayMicroseconds(10);
 }
 
 uint16_t readAddressBus() {
@@ -77,6 +122,15 @@ uint16_t readAddressBus() {
 }
 
 uint8_t readDataBus() {
+    uint16_t addr = readAddressBus();
+    bool rw       = readRW();
+
+    // If the last cycle was a write and address matches, return the captured write data
+    if (lastWasWrite && addr == lastWriteAddr) {
+        return lastWriteData;
+    }
+
+    // Otherwise read from pins
     uint8_t data = 0;
     for (int n = 0; n < 8; n++) {
         if (digitalRead(DATA[n]) == HIGH) {
@@ -138,13 +192,24 @@ void printState() {
 }
 
 void resetTarget() {
+    // Ensure clock is LOW during reset
+    digitalWrite(CLK_PIN, LOW);
+    digitalWrite(LED_BUILTIN, LOW);
+
     // Pulse reset pin LOW then HIGH
-    // 6502 requires reset to be held LOW for sufficient time
+    // 6502 requires reset to be held LOW for at least 2 clock cycles minimum
+    // Using 100ms provides plenty of margin
     digitalWrite(RESET_PIN, LOW);
-    delay(100); // Hold reset LOW for 100ms (typical 6502 requirement)
+    delay(100); // Hold reset LOW for 100ms
+
     digitalWrite(RESET_PIN, HIGH);
-    delay(10); // Small delay after releasing reset
-    cycleCount = 0;
+    delay(10); // Small delay after releasing reset before first clock cycle
+
+    // Reset state variables
+    cycleCount    = 0;
+    lastWriteData = 0;
+    lastWriteAddr = 0;
+    lastWasWrite  = false;
     Serial.println("Target reset!");
 }
 
