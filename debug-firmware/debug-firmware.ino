@@ -9,7 +9,9 @@ const int RESET_PIN = 4;                                                        
 const int CLK_DELAY_US = 100; // Clock pulse HIGH duration in microseconds
 
 // State variables
-bool continuousMode = false;
+bool continuousMode       = false;
+bool constantDataMode     = false;
+uint8_t constantDataValue = 0xEA; // Default to NOP opcode
 
 // Previous state for change detection
 uint16_t prevAddr = 0;
@@ -91,6 +93,8 @@ void setup() {
     Serial.println("  'r' = Reset target");
     Serial.println("  'c' = Toggle continuous clock mode");
     Serial.println("  's' = Single clock step");
+    Serial.println("  'd' = Toggle constant data mode");
+    Serial.println("  'd XX' = Set constant data value (hex)");
     Serial.println("  'h' = Show this help");
     Serial.println();
     Serial.println("Monitoring bus for changes...");
@@ -122,6 +126,19 @@ uint8_t readDataBus() {
 }
 
 bool readRW() { return digitalRead(RW_PIN); }
+
+void setDataBusOutput() {
+    for (int n = 0; n < 8; n++) {
+        pinMode(DATA[n], OUTPUT);
+        digitalWrite(DATA[n], (constantDataValue >> n) & 1);
+    }
+}
+
+void setDataBusInput() {
+    for (int n = 0; n < 8; n++) {
+        pinMode(DATA[n], INPUT);
+    }
+}
 
 void getOpcodeName(uint8_t opcode, char *buf) { strcpy_P(buf, OPCODE_NAMES[opcode]); }
 
@@ -213,12 +230,59 @@ void loop() {
             stepClock();
             break;
 
+        case 'd':
+        case 'D': {
+            // Check if there's a hex value following
+            delay(10); // Allow time for serial buffer to fill
+            if (Serial.available() > 0) {
+                char next = Serial.peek();
+                if (next == ' ' || (next >= '0' && next <= '9') || (next >= 'a' && next <= 'f') ||
+                    (next >= 'A' && next <= 'F')) {
+                    // Skip space if present
+                    if (next == ' ')
+                        Serial.read();
+                    // Parse hex value
+                    char hexStr[3] = {0};
+                    int idx        = 0;
+                    while (Serial.available() > 0 && idx < 2) {
+                        char c = Serial.peek();
+                        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+                            hexStr[idx++] = Serial.read();
+                        } else {
+                            break;
+                        }
+                    }
+                    if (idx > 0) {
+                        constantDataValue = (uint8_t) strtol(hexStr, NULL, 16);
+                        Serial.print("Constant data value set to: 0x");
+                        Serial.println(constantDataValue, HEX);
+                        if (constantDataMode) {
+                            setDataBusOutput(); // Update output if already enabled
+                        }
+                        break;
+                    }
+                }
+            }
+            // Toggle mode if no hex value provided
+            constantDataMode = !constantDataMode;
+            if (constantDataMode) {
+                setDataBusOutput();
+            } else {
+                setDataBusInput();
+            }
+            Serial.print("Constant data mode: ");
+            Serial.println(constantDataMode ? "ON" : "OFF");
+            break;
+        }
+
         case 'h':
         case 'H':
             Serial.println("Commands:");
             Serial.println("  'r' = Reset target");
             Serial.println("  'c' = Toggle continuous clock mode");
             Serial.println("  's' = Single clock step");
+            Serial.println("  'd' = Toggle constant data mode");
+            Serial.println("  'd XX' = Set constant data value (hex)");
             Serial.println("  'h' = Show this help");
             break;
 
