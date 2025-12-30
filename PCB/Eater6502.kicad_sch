@@ -3789,7 +3789,7 @@
 	)
 	(text_box "TODO:\nClock - steppable and crystal\nembedded MCU for clock step + serial debugging"
 		(exclude_from_sim no)
-		(at 121.92 172.72 0)
+		(at 134.62 170.18 0)
 		(size 33.02 15.24)
 		(margins 0.9525 0.9525 0.9525 0.9525)
 		(stroke
@@ -3807,10 +3807,10 @@
 		)
 		(uuid "86a6fc7f-936c-4bb2-8515-926259cdc6e2")
 	)
-	(text_box "addressing scheme docs...\nCE goes low on high addresses to enable the ROM chip\nThe rom chip exists in top half of memory space by this, it needs 15 address lines\n\nInterface adapter is at 0x6000-0x7FFF\nWhere first bits are 011"
+	(text_box "Addressing:\nROM: 0x8000-0xFFFF (high 32k)\nVIA: 0x6000-0x7FFF\n\nSetting CE low on ROM chip enables, so invert high bit of address (A15) [U3D]\nVIA has to enable bit CS1 (high) and CS2 (low) to activate [U3D, U3B]"
 		(exclude_from_sim no)
-		(at 45.72 172.72 0)
-		(size 68.58 20.32)
+		(at 45.72 167.64 0)
+		(size 83.82 25.4)
 		(margins 0.9525 0.9525 0.9525 0.9525)
 		(stroke
 			(width 0)

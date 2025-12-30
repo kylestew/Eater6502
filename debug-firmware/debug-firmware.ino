@@ -16,6 +16,42 @@ uint16_t prevAddr = 0;
 uint8_t prevData  = 0;
 bool prevRW       = true;
 
+// 6502 Opcode lookup table (stored in flash to save RAM)
+// Reference: http://www.6502.org/tutorials/6502opcodes.html
+const char OPCODE_NAMES[][4] PROGMEM = {
+    // 0x00-0x0F
+    "BRK", "ORA", "???", "???", "???", "ORA", "ASL", "???", "PHP", "ORA", "ASL", "???", "???", "ORA", "ASL", "???",
+    // 0x10-0x1F
+    "BPL", "ORA", "???", "???", "???", "ORA", "ASL", "???", "CLC", "ORA", "???", "???", "???", "ORA", "ASL", "???",
+    // 0x20-0x2F
+    "JSR", "AND", "???", "???", "BIT", "AND", "ROL", "???", "PLP", "AND", "ROL", "???", "BIT", "AND", "ROL", "???",
+    // 0x30-0x3F
+    "BMI", "AND", "???", "???", "???", "AND", "ROL", "???", "SEC", "AND", "???", "???", "???", "AND", "ROL", "???",
+    // 0x40-0x4F
+    "RTI", "EOR", "???", "???", "???", "EOR", "LSR", "???", "PHA", "EOR", "LSR", "???", "JMP", "EOR", "LSR", "???",
+    // 0x50-0x5F
+    "BVC", "EOR", "???", "???", "???", "EOR", "LSR", "???", "CLI", "EOR", "???", "???", "???", "EOR", "LSR", "???",
+    // 0x60-0x6F
+    "RTS", "ADC", "???", "???", "???", "ADC", "ROR", "???", "PLA", "ADC", "ROR", "???", "JMP", "ADC", "ROR", "???",
+    // 0x70-0x7F
+    "BVS", "ADC", "???", "???", "???", "ADC", "ROR", "???", "SEI", "ADC", "???", "???", "???", "ADC", "ROR", "???",
+    // 0x80-0x8F
+    "???", "STA", "???", "???", "STY", "STA", "STX", "???", "DEY", "???", "TXA", "???", "STY", "STA", "STX", "???",
+    // 0x90-0x9F
+    "BCC", "STA", "???", "???", "STY", "STA", "STX", "???", "TYA", "STA", "TXS", "???", "???", "STA", "???", "???",
+    // 0xA0-0xAF
+    "LDY", "LDA", "LDX", "???", "LDY", "LDA", "LDX", "???", "TAY", "LDA", "TAX", "???", "LDY", "LDA", "LDX", "???",
+    // 0xB0-0xBF
+    "BCS", "LDA", "???", "???", "LDY", "LDA", "LDX", "???", "CLV", "LDA", "TSX", "???", "LDY", "LDA", "LDX", "???",
+    // 0xC0-0xCF
+    "CPY", "CMP", "???", "???", "CPY", "CMP", "DEC", "???", "INY", "CMP", "DEX", "???", "CPY", "CMP", "DEC", "???",
+    // 0xD0-0xDF
+    "BNE", "CMP", "???", "???", "???", "CMP", "DEC", "???", "CLD", "CMP", "???", "???", "???", "CMP", "DEC", "???",
+    // 0xE0-0xEF
+    "CPX", "SBC", "???", "???", "CPX", "SBC", "INC", "???", "INX", "SBC", "NOP", "???", "CPX", "SBC", "INC", "???",
+    // 0xF0-0xFF
+    "BEQ", "SBC", "???", "???", "???", "SBC", "INC", "???", "SED", "SBC", "???", "???", "???", "SBC", "INC", "???"};
+
 void setup() {
     // Initialize serial communication
     Serial.begin(9600);
@@ -87,6 +123,8 @@ uint8_t readDataBus() {
 
 bool readRW() { return digitalRead(RW_PIN); }
 
+void getOpcodeName(uint8_t opcode, char *buf) { strcpy_P(buf, OPCODE_NAMES[opcode]); }
+
 void printCurrentState(uint16_t addr, uint8_t data, bool rw) {
     char buf[64];
     sprintf(buf, "Addr: 0x%04X (", addr);
@@ -100,13 +138,22 @@ void printCurrentState(uint16_t addr, uint8_t data, bool rw) {
         Serial.print((data >> n) & 1);
     }
     Serial.print(") | R/W: ");
-    Serial.println(rw ? "R" : "W");
+    Serial.print(rw ? "R" : "W");
+
+    // Decode opcode on reads
+    if (rw) {
+        char opname[4];
+        getOpcodeName(data, opname);
+        Serial.print(" | Op: ");
+        Serial.print(opname);
+    }
+    Serial.println();
 }
 
 /*
- The Reset (RESB) input is used to initialize the microprocessor and start program execution. 
- The RESB signal must be held low for at least two clock cycles after VDD reaches operating 
- voltage. 
+ The Reset (RESB) input is used to initialize the microprocessor and start program execution.
+ The RESB signal must be held low for at least two clock cycles after VDD reaches operating
+ voltage.
 */
 void resetTarget() {
     digitalWrite(CLK_PIN, LOW);
@@ -175,8 +222,14 @@ void loop() {
             Serial.println("  'h' = Show this help");
             break;
 
+        case '\n':
+        case '\r':
+        case ' ':
+            // Ignore whitespace/newline characters
+            break;
+
         default:
-            stepClock();
+            // Unknown command - ignore (don't step clock on garbage)
             break;
         }
 
