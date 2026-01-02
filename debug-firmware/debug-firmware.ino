@@ -73,9 +73,9 @@ void setup() {
         pinMode(DATA[n], INPUT);
     }
 
-    // Initialize clock pin as OUTPUT (initially LOW)
+    // Initialize clock pin as OUTPUT (initially HIGH - idle state)
     pinMode(CLK_PIN, OUTPUT);
-    digitalWrite(CLK_PIN, LOW);
+    digitalWrite(CLK_PIN, HIGH);
 
     // Initialize reset pin as OUTPUT (initially HIGH - not reset)
     pinMode(RESET_PIN, OUTPUT);
@@ -173,19 +173,31 @@ void printCurrentState(uint16_t addr, uint8_t data, bool rw) {
  voltage.
 */
 void resetTarget() {
-    digitalWrite(CLK_PIN, LOW);
-    digitalWrite(LED_BUILTIN, LOW);
     digitalWrite(RESET_PIN, LOW);
-    delay(100);
+    digitalWrite(LED_BUILTIN, LOW);
+
+    // Clock 4 cycles while RESET is held low
+    for (int i = 0; i < 4; i++) {
+        digitalWrite(CLK_PIN, LOW);
+        delayMicroseconds(CLK_DELAY_US);
+        digitalWrite(CLK_PIN, HIGH);
+        delayMicroseconds(CLK_DELAY_US);
+    }
+
     digitalWrite(RESET_PIN, HIGH);
+    digitalWrite(LED_BUILTIN, HIGH);
     Serial.println("Target reset!");
 }
 
 /*
  The CPU drives the address bus and reads/writes the data bus only during PHI2 HIGH.
- We capture bus state while PHI2 is HIGH for accurate readings.
+ Clock idles HIGH between cycles. Step: LOW -> HIGH, read during HIGH.
 */
 void stepClock() {
+    digitalWrite(CLK_PIN, LOW);
+    digitalWrite(LED_BUILTIN, LOW);
+    delayMicroseconds(CLK_DELAY_US);
+
     digitalWrite(CLK_PIN, HIGH);
     digitalWrite(LED_BUILTIN, HIGH);
     delayMicroseconds(CLK_DELAY_US);
@@ -194,10 +206,6 @@ void stepClock() {
     uint16_t addr = readAddressBus();
     uint8_t data  = readDataBus();
     bool rw       = readRW();
-
-    digitalWrite(CLK_PIN, LOW);
-    digitalWrite(LED_BUILTIN, LOW);
-    delayMicroseconds(CLK_DELAY_US);
 
     // Print captured state and update previous values
     printCurrentState(addr, data, rw);
