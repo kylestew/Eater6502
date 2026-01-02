@@ -183,30 +183,30 @@ void resetTarget() {
 
 /*
  The CPU drives the address bus and reads/writes the data bus only during PHI2 HIGH.
+ We capture bus state while PHI2 is HIGH for accurate readings.
 */
 void stepClock() {
     digitalWrite(CLK_PIN, HIGH);
     digitalWrite(LED_BUILTIN, HIGH);
     delayMicroseconds(CLK_DELAY_US);
-    digitalWrite(CLK_PIN, LOW);
-    digitalWrite(LED_BUILTIN, LOW);
-    delayMicroseconds(CLK_DELAY_US);
-}
 
-void loop() {
-    // Continuously poll the bus for changes
+    // Read bus while PHI2 is HIGH (when data is valid)
     uint16_t addr = readAddressBus();
     uint8_t data  = readDataBus();
     bool rw       = readRW();
 
-    // Check for changes
-    if (addr != prevAddr || data != prevData || rw != prevRW) {
-        printCurrentState(addr, data, rw);
-        prevAddr = addr;
-        prevData = data;
-        prevRW   = rw;
-    }
+    digitalWrite(CLK_PIN, LOW);
+    digitalWrite(LED_BUILTIN, LOW);
+    delayMicroseconds(CLK_DELAY_US);
 
+    // Print captured state and update previous values
+    printCurrentState(addr, data, rw);
+    prevAddr = addr;
+    prevData = data;
+    prevRW   = rw;
+}
+
+void loop() {
     // Check for serial input
     if (Serial.available() > 0) {
         char command = Serial.read();
