@@ -9,9 +9,8 @@ const int RESET_PIN = 4;                                                        
 const int CLK_DELAY_US = 100; // Clock pulse HIGH duration in microseconds
 
 // State variables
-bool continuousMode       = false;
-bool constantDataMode     = false;
-uint8_t constantDataValue = 0xEA; // Default to NOP opcode
+bool continuousMode = false;
+bool freeRunMode    = false;
 
 // Previous state for change detection
 uint16_t prevAddr = 0;
@@ -91,10 +90,10 @@ void setup() {
     Serial.println("6502 Target Debugger Ready!");
     Serial.println("Commands:");
     Serial.println("  'r' = Reset target");
-    Serial.println("  'c' = Toggle continuous clock mode");
+    Serial.println("  'c' = Toggle continuous mode (slow, ~2 Hz)");
     Serial.println("  's' = Single clock step");
-    Serial.println("  'd' = Toggle constant data mode");
-    Serial.println("  'd XX' = Set constant data value (hex)");
+    Serial.println("  'p' = Read bus (no clock step)");
+    Serial.println("  'f' = Free run (reset + fast clock)");
     Serial.println("  'h' = Show this help");
     Serial.println();
     Serial.println("Monitoring bus for changes...");
@@ -126,19 +125,6 @@ uint8_t readDataBus() {
 }
 
 bool readRW() { return digitalRead(RW_PIN); }
-
-void setDataBusOutput() {
-    for (int n = 0; n < 8; n++) {
-        pinMode(DATA[n], OUTPUT);
-        digitalWrite(DATA[n], (constantDataValue >> n) & 1);
-    }
-}
-
-void setDataBusInput() {
-    for (int n = 0; n < 8; n++) {
-        pinMode(DATA[n], INPUT);
-    }
-}
 
 void getOpcodeName(uint8_t opcode, char *buf) { strcpy_P(buf, OPCODE_NAMES[opcode]); }
 
@@ -173,11 +159,19 @@ void printCurrentState(uint16_t addr, uint8_t data, bool rw) {
  voltage.
 */
 void resetTarget() {
+    // Clock 4 cycles while RESET is held high
+    for (int i = 0; i < 4; i++) {
+        digitalWrite(CLK_PIN, LOW);
+        delayMicroseconds(CLK_DELAY_US);
+        digitalWrite(CLK_PIN, HIGH);
+        delayMicroseconds(CLK_DELAY_US);
+    }
+
     digitalWrite(RESET_PIN, LOW);
     digitalWrite(LED_BUILTIN, LOW);
 
     // Clock 4 cycles while RESET is held low
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 20; i++) {
         digitalWrite(CLK_PIN, LOW);
         delayMicroseconds(CLK_DELAY_US);
         digitalWrite(CLK_PIN, HIGH);
@@ -187,6 +181,14 @@ void resetTarget() {
     digitalWrite(RESET_PIN, HIGH);
     digitalWrite(LED_BUILTIN, HIGH);
     Serial.println("Target reset!");
+
+    // Clock 4 cycles while RESET is held low
+    for (int i = 0; i < 20; i++) {
+        digitalWrite(CLK_PIN, LOW);
+        delayMicroseconds(CLK_DELAY_US);
+        digitalWrite(CLK_PIN, HIGH);
+        delayMicroseconds(CLK_DELAY_US);
+    }
 }
 
 /*
@@ -197,9 +199,11 @@ void stepClock() {
     digitalWrite(CLK_PIN, LOW);
     digitalWrite(LED_BUILTIN, LOW);
     delayMicroseconds(CLK_DELAY_US);
+    delayMicroseconds(CLK_DELAY_US);
 
     digitalWrite(CLK_PIN, HIGH);
     digitalWrite(LED_BUILTIN, HIGH);
+    delayMicroseconds(CLK_DELAY_US);
     delayMicroseconds(CLK_DELAY_US);
 
     // Read bus while PHI2 is HIGH (when data is valid)
@@ -212,6 +216,14 @@ void stepClock() {
     prevAddr = addr;
     prevData = data;
     prevRW   = rw;
+}
+
+// Fast clock step for free run mode - no printing, minimal delay
+void stepClockFast() {
+    digitalWrite(CLK_PIN, LOW);
+    delayMicroseconds(CLK_DELAY_US);
+    digitalWrite(CLK_PIN, HIGH);
+    delayMicroseconds(CLK_DELAY_US);
 }
 
 void loop() {
@@ -229,6 +241,7 @@ void loop() {
         case 'c':
         case 'C':
             continuousMode = !continuousMode;
+            freeRunMode    = false; // Disable free run when toggling continuous
             Serial.print("Continuous clock mode: ");
             Serial.println(continuousMode ? "ON" : "OFF");
             break;
@@ -238,59 +251,32 @@ void loop() {
             stepClock();
             break;
 
-        case 'd':
-        case 'D': {
-            // Check if there's a hex value following
-            delay(10); // Allow time for serial buffer to fill
-            if (Serial.available() > 0) {
-                char next = Serial.peek();
-                if (next == ' ' || (next >= '0' && next <= '9') || (next >= 'a' && next <= 'f') ||
-                    (next >= 'A' && next <= 'F')) {
-                    // Skip space if present
-                    if (next == ' ')
-                        Serial.read();
-                    // Parse hex value
-                    char hexStr[3] = {0};
-                    int idx        = 0;
-                    while (Serial.available() > 0 && idx < 2) {
-                        char c = Serial.peek();
-                        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-                            hexStr[idx++] = Serial.read();
-                        } else {
-                            break;
-                        }
-                    }
-                    if (idx > 0) {
-                        constantDataValue = (uint8_t) strtol(hexStr, NULL, 16);
-                        Serial.print("Constant data value set to: 0x");
-                        Serial.println(constantDataValue, HEX);
-                        if (constantDataMode) {
-                            setDataBusOutput(); // Update output if already enabled
-                        }
-                        break;
-                    }
-                }
-            }
-            // Toggle mode if no hex value provided
-            constantDataMode = !constantDataMode;
-            if (constantDataMode) {
-                setDataBusOutput();
-            } else {
-                setDataBusInput();
-            }
-            Serial.print("Constant data mode: ");
-            Serial.println(constantDataMode ? "ON" : "OFF");
+        case 'p':
+        case 'P': {
+            // Read and print current bus state without stepping clock
+            uint16_t addr = readAddressBus();
+            uint8_t data  = readDataBus();
+            bool rw       = readRW();
+            printCurrentState(addr, data, rw);
             break;
         }
+
+        case 'f':
+        case 'F':
+            resetTarget();
+            freeRunMode    = true;
+            continuousMode = false; // Disable continuous when starting free run
+            Serial.println("Free run mode started!");
+            break;
 
         case 'h':
         case 'H':
             Serial.println("Commands:");
             Serial.println("  'r' = Reset target");
-            Serial.println("  'c' = Toggle continuous clock mode");
+            Serial.println("  'c' = Toggle continuous mode (slow, ~2 Hz)");
             Serial.println("  's' = Single clock step");
-            Serial.println("  'd' = Toggle constant data mode");
-            Serial.println("  'd XX' = Set constant data value (hex)");
+            Serial.println("  'p' = Read bus (no clock step)");
+            Serial.println("  'f' = Free run (reset + fast clock)");
             Serial.println("  'h' = Show this help");
             break;
 
@@ -311,8 +297,10 @@ void loop() {
         }
     }
 
-    if (continuousMode) {
+    if (freeRunMode) {
+        stepClockFast();
+    } else if (continuousMode) {
         stepClock();
-        delay(CLK_DELAY_US);
+        delay(500); // ~2 instructions per second
     }
 }
