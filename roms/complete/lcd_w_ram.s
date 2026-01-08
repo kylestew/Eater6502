@@ -39,46 +39,37 @@ reset:
     jsr lcd_instruction
 
     ; 5: Write Data
-    lda #0
-print:
-    lda message,x
-    beq loop        ; we are at the null end line char in our string
+    lda #"H"
     jsr print_char
-    inx
-    jmp print
+    lda #"e"
+    jsr print_char
+    lda #"l"
+    jsr print_char
+    lda #"l"
+    jsr print_char
+    lda #"o"
+    jsr print_char
+    lda #","
+    jsr print_char
+    lda #" "
+    jsr print_char
+    lda #"w"
+    jsr print_char
+    lda #"o"
+    jsr print_char
+    lda #"r"
+    jsr print_char
+    lda #"l"
+    jsr print_char
+    lda #"d"
+    jsr print_char
+    lda #"!"
+    jsr print_char
 
 loop:
     jmp loop
 
-message: .asciiz "Hello, world!"
-
-lcd_wait:
-    pha
-    lda #%00000000  ; Port B is INPUT
-    sta DDRB
-lcd_busy:
-    ; setup to read PORTB
-    lda #RW
-    sta PORTA
-    lda #(RW | E)
-    sta PORTA       ; toggle enable high to do read
-    ; do the read
-    lda PORTB       ; read from PORTB into A register
-
-    ; decide to loop
-    and #%10000000  ; mask the bit we want to check (zero flag set)
-    bne lcd_busy    ; branch if zero flag is not set
-
-    ; wrap up
-    lda #RW         ; clear enable bit
-    sta PORTA
-    lda #%11111111  ; Port B is OUTPUT
-    sta DDRB
-    pla
-    rts
-
 lcd_instruction:
-    jsr lcd_wait    ; wait until LCD is ready to receive
     sta PORTB       ; VIA port B connected to LCD data pins
     lda #0          ; Clear RS/RW/E bits on LCD
     sta PORTA       ; port A top 3 pins connected to LCD RS/RW/E
@@ -89,7 +80,6 @@ lcd_instruction:
     rts
 
 print_char:
-    jsr lcd_wait    ; wait until LCD is ready to receive
     sta PORTB      
     lda #RS        ; set (RS) high
     sta PORTA      
